@@ -1,0 +1,51 @@
+---
+title: "Student Forecast Simulation"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Describe a model: 
+
+```{r createSimulation}
+
+library(tidyverse)
+library(rsample)
+library(markovchain)
+
+Simulated = tibble(Id = seq(1, 100, 1),
+                   Semester = rep(c("F", "W"),50),
+                   NumberSemester = rep(1:4, 25)) %>% 
+  expand(Id, Semester, NumberSemester) %>% 
+  arrange(Id, NumberSemester, Semester) 
+
+Simulated2 = Simulated %>% 
+  mutate(ProbOfMovingOn = runif(dim(Simulated)[1], 0,1),
+         MovedOn = case_when(ProbOfMovingOn > .1 ~ 1, TRUE ~ 0) ,
+         CurrentSemester= case_when( MovedOn == 1 ~ paste0(Semester, NumberSemester), TRUE ~ "Leave")) %>% 
+  group_by(Id) %>% 
+  mutate(FutureSemester = lead(CurrentSemester)) %>% 
+  ungroup() 
+  
+
+```
+
+
+The next step is to simulate the chances of moving on. 
+
+```{r ShowData}
+
+knitr::kable(head(Simulated2))
+
+```
+
+```{r CreateProbs}
+
+knitr::kable( Simulated2 %>% 
+  count(CurrentSemester, FutureSemester) %>% 
+  tidyr::spread(FutureSemester, n, fill = 0) )
+
+```
+
