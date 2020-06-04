@@ -1,0 +1,38 @@
+---
+title: "Student Forecast Simulation"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Describe a model: 
+
+```{r createSimulation}
+
+library(tidyverse)
+library(rsample)
+library(markovchain)
+
+Simulated = tibble(Id = seq(1, 100, 1),
+                   Semester = rep(c("F", "W"),50),
+                   NumberSemester = rep(1:4, 25)) %>% 
+  expand(Id, Semester, NumberSemester) %>% 
+  arrange(Id, NumberSemester, Semester) %>% 
+  mutate(CurrentSemester= paste0(Semester, NumberSemester)) %>% 
+  group_by(Id) %>% 
+  mutate(FutureSemester = lead(CurrentSemester)) %>% 
+  ungroup() 
+
+
+
+```
+
+
+```{r ShowData}
+
+knitr::kable(head(Simulated))
+
+```
+
