@@ -44,8 +44,12 @@ knitr::kable(head(Simulated2))
 ```{r CreateProbs}
 
 knitr::kable( Simulated2 %>% 
-  count(CurrentSemester, FutureSemester) %>% 
-  tidyr::spread(FutureSemester, n, fill = 0) ) 
+  count( FutureSemester) %>%
+    left_join(Simulated2 %>% 
+                count(FutureSemester, CurrentSemester), by = "FutureSemester") %>% 
+    mutate(prob = n.y / n.x) %>% 
+    select(FutureSemester, CurrentSemester, prob) %>% 
+  tidyr::spread(FutureSemester, prob, fill = 0) ) 
 
 
 
