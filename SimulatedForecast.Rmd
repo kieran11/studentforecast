@@ -45,7 +45,11 @@ knitr::kable(head(Simulated2))
 
 knitr::kable( Simulated2 %>% 
   count(CurrentSemester, FutureSemester) %>% 
-  tidyr::spread(FutureSemester, n, fill = 0) )
+  tidyr::spread(FutureSemester, n, fill = 0) ) 
+
+
 
 ```
+
+
 
