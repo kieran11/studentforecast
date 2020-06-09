@@ -15,6 +15,8 @@ library(tidyverse)
 library(rsample)
 library(markovchain)
 
+set.seed(1234)
+
 Simulated = tibble(Id = seq(1, 100, 1),
                    Semester = rep(c("F", "W"),50),
                    NumberSemester = rep(1:4, 25)) %>% 
@@ -30,6 +32,20 @@ Simulated2 = Simulated %>%
   ungroup() 
   
 
+SimulatedGraduate_a = tibble(Id = seq(1, 100, 1))
+
+SimulatedGraduate = SimulatedGraduate_a %>% 
+  mutate(ProbOfGraduating = runif(dim(SimulatedGraduate_a)[1], 0,1),
+         Graduated = case_when(ProbOfGraduating > .2 ~ 1, TRUE ~ 0) )
+
+simulated3 = Simulated2 %>% 
+  inner_join(SimulatedGraduate , by = "Id") %>%
+  group_by(Id) %>% 
+  mutate(FutureSemester = ifelse(is.na(FutureSemester) & row_number() == n() & Graduated == 1 , "Graduated",
+                                 ifelse(row_number() == n() , "Not graduated", FutureSemester))) %>% 
+  ungroup()
+
+
 ```
 
 
@@ -43,17 +59,98 @@ knitr::kable(head(Simulated2))
 
 ```{r CreateProbs}
 
-knitr::kable( Simulated2 %>% 
-  count( FutureSemester) %>%
-    left_join(Simulated2 %>% 
-                count(FutureSemester, CurrentSemester), by = "FutureSemester") %>% 
-    mutate(prob = n.y / n.x) %>% 
-    select(FutureSemester, CurrentSemester, prob) %>% 
-  tidyr::spread(FutureSemester, prob, fill = 0) ) 
+Denominator = simulated3 %>% 
+  count(CurrentSemester)
 
+GroupedSimulation=  simulated3 %>%
+  count(FutureSemester, CurrentSemester) %>% 
+  inner_join(Denominator, by = "CurrentSemester") %>% 
+  mutate(prob = n.x / n.y) %>%
+  select(FutureSemester, CurrentSemester, prob) 
 
 
 ```
 
 
+```{r unbalancedMat}
+
+GroupedSimulation %>% 
+  tidyr::spread(FutureSemester, prob, fill = 0) 
+
+```
+
+```{r CreateMarkovChain} 
+
+MatForMCShow = GroupedSimulation %>% 
+  add_row(CurrentSemester = c("Graduated", "Not graduated", "F1"),
+          FutureSemester = c("Not graduated", "Graduated", "F1"), prob = c(1,1,0) ) %>% 
+  tidyr::spread(FutureSemester, prob, fill = 0) 
+
+MatForMC = MatForMCShow %>%
+  select(-CurrentSemester) %>% 
+  as.matrix()
+
+DefineTransitionStates = colnames(MatForMC)
+
+CreateTransitionMatrix = new("markovchain",
+                             states = DefineTransitionStates,
+                             byrow = T,
+                             transitionMatrix = MatForMC,
+                             name = "Forecast")
+
+```
+
+```{r MakeAForecasts}
+
+out <- data.frame()
+
+LengthofMC = rep(0, length(names(CreateTransitionMatrix)) -1 )
+initialstate = c(100,LengthofMC)
+names(initialstate) <- names(CreateTransitionMatrix)
+
+for (i in 0:6) {
+  
+  iteration <- initialstate*CreateTransitionMatrix^(i)
+  out <- rbind(out, iteration)
+}
+
+
+```
+
+
+```{r Bootstrapped}
+
+Boots = rsample::bootstraps(simulated3 %>% 
+                              distinct(Id), 4) %>% 
+  mutate(FullIDs = purrr::map(splits, rsample::analysis) ,
+         FullDataSet = purrr::map(FullIDs , ~ .x %>% inner_join(simulated3, by = "Id"))) 
+
+```
+
+
+```{r functionforBoots}
+
+BootMC = function(x) {
+  
+  FuncBoot=  x %>%
+    count(FutureSemester, CurrentSemester) %>% 
+    inner_join(Denominator, by = "CurrentSemester") %>% 
+    mutate(prob = n.x / n.y) %>%
+    select(FutureSemester, CurrentSemester, prob) %>% 
+    select(-CurrentSemester) %>% 
+    as.matrix()
+  
+  DefineTransitionStatesFunc = colnames(FuncBoot)
+  
+  CreateTransitionMatrix = new("markovchain",
+                               states = DefineTransitionStatesFunc,
+                               byrow = T,
+                               transitionMatrix = FuncBoot,
+                               name = "Forecast Boot")
+  
+  return(CreateTransitionMatrix)
+
+  }
+
+```
 
