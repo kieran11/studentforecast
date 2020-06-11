@@ -4,7 +4,7 @@ output: github_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE , message = FALSE)
 ```
 
 ## Describe a model: 
@@ -14,6 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(rsample)
 library(markovchain)
+library(gt)
 
 set.seed(1234)
 
@@ -53,9 +54,14 @@ The next step is to simulate the chances of moving on.
 
 ```{r ShowData}
 
-knitr::kable(head(Simulated2))
+gt(head(Simulated2 %>% 
+          mutate_at(vars(ProbOfMovingOn), ~round(., digits = 3)))) %>% 
+    tab_header(
+    title = "Student-level data example")
 
 ```
+
+
 
 ```{r CreateProbs}
 
@@ -71,11 +77,20 @@ GroupedSimulation=  simulated3 %>%
 
 ```
 
+The table below shows the transition matrix for the one hunderd students example. 
 
 ```{r unbalancedMat}
 
-GroupedSimulation %>% 
-  tidyr::spread(FutureSemester, prob, fill = 0) 
+  gt(data =  GroupedSimulation %>% 
+       tidyr::spread(FutureSemester, prob, fill = 0) %>% 
+       mutate_if(is.numeric, ~round(., digits = 3 ))) %>%
+  tab_header(
+    title = "Transition Matrix") %>%
+  tab_spanner(
+    label = "Following Semester",
+    columns = vars( F2, F3, F4, Graduated, Leave, `Not graduated`, W1, W2, W3, W4)
+  )
+
 
 ```
 
@@ -108,7 +123,7 @@ LengthofMC = rep(0, length(names(CreateTransitionMatrix)) -1 )
 initialstate = c(100,LengthofMC)
 names(initialstate) <- names(CreateTransitionMatrix)
 
-for (i in 0:6) {
+for (i in 0:10) {
   
   iteration <- initialstate*CreateTransitionMatrix^(i)
   out <- rbind(out, iteration)
@@ -118,39 +133,102 @@ for (i in 0:6) {
 ```
 
 
-```{r Bootstrapped}
-
-Boots = rsample::bootstraps(simulated3 %>% 
-                              distinct(Id), 4) %>% 
-  mutate(FullIDs = purrr::map(splits, rsample::analysis) ,
-         FullDataSet = purrr::map(FullIDs , ~ .x %>% inner_join(simulated3, by = "Id"))) 
-
-```
 
 
 ```{r functionforBoots}
 
 BootMC = function(x) {
+
+  DenominatorFunc = x %>% 
+    count(CurrentSemester)
   
   FuncBoot=  x %>%
     count(FutureSemester, CurrentSemester) %>% 
-    inner_join(Denominator, by = "CurrentSemester") %>% 
+    inner_join(DenominatorFunc, by = "CurrentSemester") %>% 
     mutate(prob = n.x / n.y) %>%
-    select(FutureSemester, CurrentSemester, prob) %>% 
-    select(-CurrentSemester) %>% 
+    select(FutureSemester, CurrentSemester, prob) %>%
+    add_row(CurrentSemester = c("Graduated", "Not graduated", "F1"),
+          FutureSemester = c("Not graduated", "Graduated", "F1"), prob = c(1,1,0) ) %>% 
+    tidyr::spread(FutureSemester, prob, fill = 0) %>%  
+    select(-CurrentSemester) %>%  
     as.matrix()
-  
+
   DefineTransitionStatesFunc = colnames(FuncBoot)
-  
+
   CreateTransitionMatrix = new("markovchain",
                                states = DefineTransitionStatesFunc,
                                byrow = T,
                                transitionMatrix = FuncBoot,
                                name = "Forecast Boot")
-  
+
   return(CreateTransitionMatrix)
 
   }
 
+PutTogether = function(x) {
+
+  out <- data.frame()
+
+LengthofMC = rep(0, length(names(x)) -1 )
+initialstate = c(100,LengthofMC)
+names(initialstate) <- names(x)
+
+  for (i in 0:10) {
+    
+    iteration <- initialstate*x^(i)
+    out <- rbind(out, iteration)
+  }
+return(out)
+}
+   
+CleanFunc = function(x) {
+  
+OutFile = x %>% 
+  tidyr::gather(Name, Value) %>% 
+  group_by(Name) %>% 
+  summarise_if(is.numeric, sum) %>% 
+  ungroup() %>% 
+  filter(stringi::stri_sub(Name , 1, 1) %in% c("F" , "W")) %>% 
+  mutate(SemesterName = case_when(stringi::stri_sub(Name, 1, 1) == "F" ~ 
+                                    stringi::stri_replace_all_fixed( Name, "F", "Fall-"),
+                                  TRUE ~ stringi::stri_replace_all_fixed( Name, "W", "Winter-")))
+  
+return(OutFile)
+
+}
+
 ```
+
+
+```{r Bootstrapped , cache=TRUE}
+
+Boots = rsample::bootstraps(simulated3 %>% 
+                              distinct(Id), 500) %>% 
+  mutate(FullIDs = purrr::map(splits, rsample::analysis) ,
+         FullDataSet = purrr::map(FullIDs , ~ .x %>% inner_join(simulated3, by = "Id")),
+         MC = purrr::map(FullDataSet, BootMC) , 
+         Output1 = purrr::map(MC, PutTogether)  ,
+         Output2 = purrr::map(Output1 , CleanFunc)) 
+
+
+```
+
+```{r PlotOfBoots}
+
+BootsPlot = Boots %>% 
+  select(Output2, id) %>% 
+  tidyr::unnest(c( id,Output2 )) %>% 
+  filter(SemesterName %in% c("Fall-2" , "Fall-3")) %>% 
+  ggplot(., aes( x = Value)) +
+  geom_density() +
+  theme_classic() +
+  labs(x = "Headcount") +
+  facet_wrap(~SemesterName) 
+  
+BootsPlot
+
+
+```
+
+
 
